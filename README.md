@@ -1,4 +1,4 @@
-# Twilio Whisper Integration
+# Twilio - OpenAI Realtime API Integration
 
 TwilioとOpenAI Realtime APIを組み合わせた日本語を英語に翻訳するAgent機能
 
