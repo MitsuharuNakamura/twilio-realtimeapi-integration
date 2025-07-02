@@ -1,32 +1,57 @@
 const express = require('express');
 const WebSocket = require('ws');
+const twilio = require('twilio');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Twilio client初期化
+const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Twilio Webhookエンドポイント
-app.post('/voice', (req, res) => {
+app.post('/voice', async (req, res) => {
   const callSid = req.body.CallSid;
   console.log(`Incoming call: ${callSid}`);
   
-  const twiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Pause length="3"/>
-  <Say language="ja-JP">日本語を英語に翻訳します</Say>
-  <Connect>
-    <Stream url="wss://${req.headers.host}/media-stream">
-      <Parameter name="callSid" value="${callSid}" />
-    </Stream>
-  </Connect>
-</Response>`;
+  const twiml = new twilio.twiml.VoiceResponse();
+  
+  twiml.say('日本語を英語に翻訳します', { language: 'ja-JP' });
+  
+  const connect = twiml.connect();
+  const stream = connect.stream({ url: `wss://${req.headers.host}/media-stream` });
+  stream.parameter({ name: 'callSid', value: callSid });
 
   res.type('text/xml');
-  res.send(twiml);
+  res.send(twiml.toString());
 });
+
+// 録音ステータスのコールバック
+app.post('/recording-status', (req, res) => {
+  const recordingStatus = req.body.RecordingStatus;
+  const recordingSid = req.body.RecordingSid;
+  const recordingUrl = req.body.RecordingUrl;
+  const callSid = req.body.CallSid;
+  const duration = req.body.RecordingDuration;
+  
+  console.log(`Recording status update:`);
+  console.log(`  Call SID: ${callSid}`);
+  console.log(`  Recording SID: ${recordingSid}`);
+  console.log(`  Status: ${recordingStatus}`);
+  
+  if (recordingStatus === 'completed') {
+    console.log(`  Duration: ${duration} seconds`);
+    console.log(`  URL: ${recordingUrl}`);
+  }
+  
+  // TwilioはXMLレスポンスを期待するため、空のTwiMLを返す
+  res.type('text/xml');
+  res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+});
+
 
 // HTTPサーバーの作成
 const server = app.listen(PORT, () => {
@@ -40,7 +65,7 @@ const wss = new WebSocket.Server({
 });
 
 // WebSocket接続の管理
-wss.on('connection', (ws) => {
+wss.on('connection', async (ws, req) => {
   console.log('Client connected');
   
   let streamSid = null;
@@ -234,6 +259,21 @@ wss.on('connection', (ws) => {
         streamSid = data.streamSid;
         callSid = data.start.callSid;
         console.log(`Stream started: ${streamSid}`);
+        
+        // 録音を開始
+        if (callSid && process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+          try {
+            const recording = await twilioClient.calls(callSid)
+              .recordings
+              .create({
+                recordingStatusCallback: `https://${req.headers.host}/recording-status`,
+                recordingStatusCallbackEvent: ['in-progress', 'completed', 'absent']
+              });
+            console.log(`Recording started for call ${callSid}, Recording SID: ${recording.sid}`);
+          } catch (error) {
+            console.error('Failed to start recording:', error);
+          }
+        }
         
         // OpenAIに接続
         connectToOpenAI();
