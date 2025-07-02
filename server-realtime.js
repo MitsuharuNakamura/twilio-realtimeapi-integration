@@ -15,7 +15,7 @@ app.post('/voice', (req, res) => {
   
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Pause length="2"/>
+  <Pause length="3"/>
   <Say language="ja-JP">日本語を英語に翻訳します</Say>
   <Connect>
     <Stream url="wss://${req.headers.host}/media-stream">
